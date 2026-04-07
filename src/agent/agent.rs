@@ -71,6 +71,8 @@ pub struct Agent {
     /// When MCP deferred loading is enabled, tools are activated via `tool_search`
     /// and stored here for lookup during tool execution.
     activated_tools: Option<Arc<std::sync::Mutex<crate::tools::ActivatedToolSet>>>,
+    /// Multimodal config for processing [IMAGE:] markers in turn_streamed.
+    multimodal_config: crate::config::MultimodalConfig,
 }
 
 pub struct AgentBuilder {
@@ -99,6 +101,7 @@ pub struct AgentBuilder {
     security_summary: Option<String>,
     autonomy_level: Option<crate::security::AutonomyLevel>,
     activated_tools: Option<Arc<std::sync::Mutex<crate::tools::ActivatedToolSet>>>,
+    multimodal_config: Option<crate::config::MultimodalConfig>,
 }
 
 impl AgentBuilder {
@@ -129,6 +132,7 @@ impl AgentBuilder {
             security_summary: None,
             autonomy_level: None,
             activated_tools: None,
+            multimodal_config: None,
         }
     }
 
@@ -269,6 +273,11 @@ impl AgentBuilder {
         self
     }
 
+    pub fn multimodal_config(mut self, config: crate::config::MultimodalConfig) -> Self {
+        self.multimodal_config = Some(config);
+        self
+    }
+
     pub fn build(self) -> Result<Agent> {
         let mut tools = self
             .tools
@@ -325,6 +334,9 @@ impl AgentBuilder {
                 .autonomy_level
                 .unwrap_or(crate::security::AutonomyLevel::Supervised),
             activated_tools: self.activated_tools,
+            multimodal_config: self
+                .multimodal_config
+                .unwrap_or_default(),
         })
     }
 }
@@ -556,6 +568,7 @@ impl Agent {
             .security_summary(Some(security.prompt_summary()))
             .autonomy_level(config.autonomy.level)
             .activated_tools(activated_tools)
+            .multimodal_config(config.multimodal.clone())
             .build()
     }
 
@@ -954,7 +967,14 @@ impl Agent {
 
         // ── Turn loop ──────────────────────────────────────────────────
         for _ in 0..self.config.max_tool_iterations {
-            let messages = self.tool_dispatcher.to_provider_messages(&self.history);
+            let raw_messages = self.tool_dispatcher.to_provider_messages(&self.history);
+            // Process [IMAGE:] markers through multimodal pipeline (local file → base64 data URI)
+            let prepared = crate::multimodal::prepare_messages_for_provider(
+                &raw_messages,
+                &self.multimodal_config,
+            )
+            .await?;
+            let messages = prepared.messages;
 
             // Response cache check (same as turn)
             let cache_key = if self.temperature == 0.0 {

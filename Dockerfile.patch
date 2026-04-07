@@ -1,0 +1,24 @@
+# Build patched ZeroClaw binary from local source
+# Usage: docker build -f Dockerfile.patch -t zeroclaw-build .
+#        docker cp $(docker create zeroclaw-build):/zeroclaw ./zeroclaw
+
+FROM rust:1.94-slim-bookworm AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config libssl-dev git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+COPY . .
+
+# Remove tauri from workspace members (requires system deps we don't need)
+RUN sed -i 's/, "apps\/tauri"//' Cargo.toml
+
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/build/target \
+    cargo build --release --features browser-native \
+    && cp target/release/zeroclaw /zeroclaw
+
+FROM scratch
+COPY --from=builder /zeroclaw /zeroclaw

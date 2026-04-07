@@ -6,11 +6,14 @@ use std::path::Path;
 
 const IMAGE_MARKER_PREFIX: &str = "[IMAGE:";
 const ALLOWED_IMAGE_MIME_TYPES: &[&str] = &[
+    // Images
     "image/png",
     "image/jpeg",
     "image/webp",
     "image/gif",
     "image/bmp",
+    // Documents
+    "application/pdf",
 ];
 
 #[derive(Debug, Clone)]
@@ -466,6 +469,7 @@ fn mime_from_extension(ext: &str) -> Option<&'static str> {
         "webp" => Some("image/webp"),
         "gif" => Some("image/gif"),
         "bmp" => Some("image/bmp"),
+        "pdf" => Some("application/pdf"),
         _ => None,
     }
 }
@@ -490,6 +494,14 @@ fn mime_from_magic(bytes: &[u8]) -> Option<&'static str> {
     if bytes.len() >= 2 && bytes.starts_with(b"BM") {
         return Some("image/bmp");
     }
+
+    if bytes.len() >= 5 && bytes.starts_with(b"%PDF-") {
+        return Some("application/pdf");
+    }
+
+    // Office Open XML (.docx, .pptx, .xlsx) — all are ZIP files with PK header
+    // Rely on extension detection via mime_from_extension() for specific type
+    // Magic bytes alone cannot distinguish docx/pptx/xlsx
 
     None
 }

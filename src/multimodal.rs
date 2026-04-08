@@ -862,4 +862,42 @@ mod tests {
         );
         assert_eq!(refs.len(), 1);
     }
+
+    #[test]
+    fn mime_from_extension_detects_pdf() {
+        assert_eq!(mime_from_extension("pdf"), Some("application/pdf"));
+        assert_eq!(mime_from_extension("PDF"), Some("application/pdf"));
+    }
+
+    #[test]
+    fn mime_from_magic_detects_pdf() {
+        let pdf_bytes = b"%PDF-1.4 fake content";
+        assert_eq!(mime_from_magic(pdf_bytes), Some("application/pdf"));
+    }
+
+    #[tokio::test]
+    async fn prepare_messages_normalizes_local_pdf_to_data_uri() {
+        let temp = tempfile::tempdir().unwrap();
+        let pdf_path = temp.path().join("test.pdf");
+
+        // Minimal PDF-like content with correct magic bytes
+        std::fs::write(&pdf_path, b"%PDF-1.4 fake pdf content for testing").unwrap();
+
+        let messages = vec![ChatMessage::user(format!(
+            "Read this document [IMAGE:{}]",
+            pdf_path.display()
+        ))];
+
+        let prepared = prepare_messages_for_provider(&messages, &MultimodalConfig::default())
+            .await
+            .unwrap();
+
+        assert!(prepared.contains_images);
+        assert_eq!(prepared.messages.len(), 1);
+
+        let (cleaned, refs) = parse_image_markers(&prepared.messages[0].content);
+        assert_eq!(cleaned, "Read this document");
+        assert_eq!(refs.len(), 1);
+        assert!(refs[0].starts_with("data:application/pdf;base64,"));
+    }
 }

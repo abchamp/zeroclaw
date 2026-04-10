@@ -6073,6 +6073,15 @@ pub struct CronConfig {
     /// Enable the cron subsystem. Default: `true`.
     #[serde(default = "default_true")]
     pub enabled: bool,
+    /// Enable job execution by the built-in scheduler. Default: `true`.
+    ///
+    /// When `false`, the scheduler loop still runs (for liveness) but
+    /// skips executing due jobs. CRUD tools (cron_add, cron_list,
+    /// cron_update, cron_remove) remain functional — only execution
+    /// is suppressed. Useful when an external scheduler handles
+    /// job triggering.
+    #[serde(default = "default_true")]
+    pub execute_jobs: bool,
     /// Run all overdue jobs at scheduler startup. Default: `true`.
     ///
     /// When the machine boots late or the daemon restarts, jobs whose
@@ -6181,6 +6190,7 @@ impl Default for CronConfig {
     fn default() -> Self {
         Self {
             enabled: true,
+            execute_jobs: true,
             catch_up_on_startup: true,
             max_run_history: default_max_run_history(),
             jobs: Vec::new(),
@@ -11102,6 +11112,7 @@ recipient = "42"
     async fn cron_config_serde_roundtrip() {
         let c = CronConfig {
             enabled: false,
+            execute_jobs: true,
             catch_up_on_startup: false,
             max_run_history: 100,
             jobs: Vec::new(),

@@ -87,6 +87,15 @@ pub async fn run(config: Config, event_tx: EventBroadcast) -> Result<()> {
     //    if the machine was off for a while. The catch-up phase fetches
     //    without the `max_tasks` limit so every missed job fires once.
     //    Controlled by `[cron] catch_up_on_startup` (default: true).
+    if !config.cron.execute_jobs {
+        tracing::info!("Scheduler startup: job execution disabled (cron.execute_jobs=false), CRUD tools still active");
+        // Still run the loop for liveness, but skip execution
+        loop {
+            interval.tick().await;
+            crate::health::mark_component_ok(SCHEDULER_COMPONENT);
+        }
+    }
+
     if config.cron.catch_up_on_startup {
         catch_up_overdue_jobs(&config, &security, &event_tx).await;
     } else {

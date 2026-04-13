@@ -1342,6 +1342,52 @@ pub async fn handle_api_session_messages(
     .into_response()
 }
 
+/// POST /api/sessions/{id}/messages — append a message to a gateway session
+pub async fn handle_api_session_append_message(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    if let Err(e) = require_auth(&state, &headers) {
+        return e.into_response();
+    }
+
+    let Some(ref backend) = state.session_backend else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "Session persistence is disabled"})),
+        )
+            .into_response();
+    };
+
+    let role = body.get("role").and_then(|v| v.as_str()).unwrap_or("assistant");
+    let content = body.get("content").and_then(|v| v.as_str()).unwrap_or("");
+
+    if content.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "content is required"})),
+        )
+            .into_response();
+    }
+
+    let session_key = format!("gw_{id}");
+    let message = crate::providers::traits::ChatMessage {
+        role: role.to_string(),
+        content: content.to_string(),
+    };
+
+    match backend.append(&session_key, &message) {
+        Ok(()) => Json(serde_json::json!({"ok": true, "session_id": id, "role": role})).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Failed to append: {e}")})),
+        )
+            .into_response(),
+    }
+}
+
 /// DELETE /api/sessions/{id} — delete a gateway session
 pub async fn handle_api_session_delete(
     State(state): State<AppState>,

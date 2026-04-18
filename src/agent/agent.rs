@@ -550,6 +550,24 @@ impl Agent {
             None
         };
 
+        // Filter out excluded tools from the main agent's tool list.
+        // Excluded tools are still registered in parent_tools (sub-agents can
+        // access them via allowed_tools) but are not visible to the main LLM.
+        let tools = if config.agent.excluded_tools.is_empty() {
+            tools
+        } else {
+            let excluded: std::collections::HashSet<&str> = config
+                .agent
+                .excluded_tools
+                .iter()
+                .map(|s| s.as_str())
+                .collect();
+            tools
+                .into_iter()
+                .filter(|t| !excluded.contains(t.name()))
+                .collect()
+        };
+
         Agent::builder()
             .provider(provider)
             .tools(tools)

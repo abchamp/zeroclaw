@@ -569,6 +569,7 @@ mod tests {
                 agentic_timeout_secs: None,
                 skills_directory: None,
                 memory_namespace: None,
+                allowed_skills: Vec::new(),
             },
         );
         agents.insert(
@@ -587,6 +588,7 @@ mod tests {
                 agentic_timeout_secs: None,
                 skills_directory: None,
                 memory_namespace: None,
+                allowed_skills: Vec::new(),
             },
         );
         agents
@@ -950,6 +952,7 @@ mod tests {
             agentic_timeout_secs: None,
             skills_directory: None,
             memory_namespace: None,
+            allowed_skills: Vec::new(),
         };
 
         let tracked = tool.create_tracked_tools(&agent_config, &tracker);

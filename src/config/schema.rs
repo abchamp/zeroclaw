@@ -673,6 +673,11 @@ pub struct DelegateAgentConfig {
     /// preventing cross-contamination with memory from other agents.
     #[serde(default)]
     pub memory_namespace: Option<String>,
+    /// Optional skill names to load for this agent.
+    /// When empty (default), no skills are loaded (keeps context small).
+    /// When set, only skills matching these names are injected into the system prompt.
+    #[serde(default)]
+    pub allowed_skills: Vec<String>,
 }
 
 fn default_delegate_timeout_secs() -> u64 {
@@ -1545,6 +1550,14 @@ pub struct AgentConfig {
     /// behavior). Default: `2`.
     #[serde(default = "default_keep_tool_context_turns")]
     pub keep_tool_context_turns: usize,
+
+    /// Tools to exclude from the main agent's tool list.
+    /// Tools listed here are still registered internally (sub-agents can use them
+    /// via `allowed_tools`) but are not sent to the LLM as available tools.
+    /// Use this to reduce tool noise for models that struggle with large tool lists.
+    /// Default: `[]` (no exclusions — all tools visible).
+    #[serde(default)]
+    pub excluded_tools: Vec<String>,
 }
 
 fn default_max_tool_result_chars() -> usize {
@@ -1596,6 +1609,7 @@ impl Default for AgentConfig {
                 crate::agent::context_compressor::ContextCompressionConfig::default(),
             max_tool_result_chars: default_max_tool_result_chars(),
             keep_tool_context_turns: default_keep_tool_context_turns(),
+            excluded_tools: Vec::new(),
         }
     }
 }
@@ -12040,6 +12054,7 @@ default_temperature = 0.7
                 agentic_timeout_secs: None,
                 skills_directory: None,
                 memory_namespace: None,
+                allowed_skills: Vec::new(),
             },
         );
 

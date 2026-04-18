@@ -1336,6 +1336,36 @@ impl Agent {
                     .await;
             }
 
+            // Strip __orchestrated_tool_calls from results before adding to
+            // history. The re-emit above already forwarded sub-tool events to
+            // the WebSocket; keeping the raw JSON in history confuses the LLM
+            // (it sees the full cron_add args/result and may re-call orchestrate).
+            let results: Vec<_> = results
+                .into_iter()
+                .map(|mut r| {
+                    if let Ok(mut parsed) =
+                        serde_json::from_str::<serde_json::Value>(&r.output)
+                    {
+                        if parsed
+                            .get(crate::tools::orchestrator::ORCHESTRATED_CALLS_KEY)
+                            .is_some()
+                        {
+                            // Keep only the "response" field for LLM history
+                            if let Some(response) = parsed.get("response").and_then(|v| v.as_str())
+                            {
+                                r.output = response.to_string();
+                            } else {
+                                parsed
+                                    .as_object_mut()
+                                    .map(|obj| obj.remove(crate::tools::orchestrator::ORCHESTRATED_CALLS_KEY));
+                                r.output = parsed.to_string();
+                            }
+                        }
+                    }
+                    r
+                })
+                .collect();
+
             let formatted = self.tool_dispatcher.format_results(&results);
             self.history.push(formatted);
             self.trim_history();

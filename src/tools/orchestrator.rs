@@ -14,6 +14,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
+use tracing::info;
 
 /// JSON key embedded in ToolResult.output so that turn_streamed() can detect
 /// and re-emit sub-agent tool calls as TurnEvents on the WebSocket.
@@ -58,9 +59,24 @@ impl Tool for TrackingToolWrapper {
     }
 
     async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
+        let tool_name = self.inner.name().to_string();
+        info!(
+            tool = %tool_name,
+            "[orchestrate] SUB-TOOL '{}' called",
+            tool_name
+        );
         let result = self.inner.execute(args.clone()).await?;
+        info!(
+            tool = %tool_name,
+            success = result.success,
+            output_len = result.output.len(),
+            "[orchestrate] SUB-TOOL '{}' result (success={}, output={}chars)",
+            tool_name,
+            result.success,
+            result.output.len()
+        );
         self.tracker.lock().push(TrackedToolCall {
-            name: self.inner.name().to_string(),
+            name: tool_name,
             args,
             result: result.output.clone(),
             success: result.success,
@@ -211,12 +227,33 @@ impl OrchestratorTool {
             String::new()
         };
 
-        // Minimal sections — no SkillsSection, no WorkspaceSection.
+        // Load filtered skills if allowed_skills is configured.
+        let skills = if agent_config.allowed_skills.is_empty() {
+            vec![]
+        } else {
+            let skills_dir = agent_config
+                .skills_directory
+                .as_ref()
+                .filter(|s| !s.trim().is_empty())
+                .map(|dir| workspace_dir.join(dir))
+                .unwrap_or_else(|| crate::skills::skills_dir(workspace_dir));
+            let all_skills = crate::skills::load_skills_from_directory(&skills_dir, true);
+            all_skills
+                .into_iter()
+                .filter(|s| {
+                    agent_config
+                        .allowed_skills
+                        .iter()
+                        .any(|name| name == &s.name)
+                })
+                .collect()
+        };
+
         let ctx = PromptContext {
             workspace_dir,
             model_name: &agent_config.model,
             tools: sub_tools,
-            skills: &[],
+            skills: &skills,
             skills_prompt_mode: crate::config::SkillsPromptInjectionMode::Full,
             identity_config: None,
             dispatcher_instructions: "",
@@ -225,10 +262,15 @@ impl OrchestratorTool {
             autonomy_level: crate::security::AutonomyLevel::default(),
         };
 
-        let builder = SystemPromptBuilder::default()
+        let mut builder = SystemPromptBuilder::default()
             .add_section(Box::new(crate::agent::prompt::ToolsSection))
             .add_section(Box::new(crate::agent::prompt::SafetySection))
             .add_section(Box::new(crate::agent::prompt::DateTimeSection));
+
+        // Only add SkillsSection if there are skills to inject.
+        if !skills.is_empty() {
+            builder = builder.add_section(Box::new(crate::agent::prompt::SkillsSection));
+        }
 
         let mut enriched = builder.build(&ctx).unwrap_or_default();
 
@@ -472,6 +514,14 @@ impl Tool for OrchestratorTool {
 
         // -- Sequential execution -------------------------------------------
 
+        info!(
+            orchestration = orch_name,
+            agents = ?orch_config.agents,
+            prompt_len = prompt.len(),
+            "[orchestrate] START orchestration '{orch_name}' with {} agents",
+            orch_config.agents.len()
+        );
+
         let tracker = Arc::new(Mutex::new(Vec::<TrackedToolCall>::new()));
         let mut current_input = prompt.to_string();
         let per_agent_timeout =
@@ -503,6 +553,21 @@ impl Tool for OrchestratorTool {
                 )
             };
 
+            info!(
+                agent = agent_name,
+                step = i + 1,
+                agentic = agent_config.agentic,
+                tools = ?agent_config.allowed_tools,
+                skills = ?agent_config.allowed_skills,
+                "[orchestrate] AGENT {}/{} '{}' starting (agentic={}, tools={}, skills={})",
+                i + 1,
+                orch_config.agents.len(),
+                agent_name,
+                agent_config.agentic,
+                agent_config.allowed_tools.len(),
+                agent_config.allowed_skills.len()
+            );
+
             match self
                 .execute_agent(
                     agent_name,
@@ -514,9 +579,32 @@ impl Tool for OrchestratorTool {
                 .await
             {
                 Ok(output) => {
+                    let tracked_count = tracker.lock().len();
+                    info!(
+                        agent = agent_name,
+                        step = i + 1,
+                        output_len = output.len(),
+                        tracked_tool_calls = tracked_count,
+                        "[orchestrate] AGENT {}/{} '{}' completed (output={}chars, tracked_calls={})",
+                        i + 1,
+                        orch_config.agents.len(),
+                        agent_name,
+                        output.len(),
+                        tracked_count
+                    );
                     current_input = output;
                 }
                 Err(e) => {
+                    info!(
+                        agent = agent_name,
+                        step = i + 1,
+                        error = %e,
+                        "[orchestrate] AGENT {}/{} '{}' FAILED: {}",
+                        i + 1,
+                        orch_config.agents.len(),
+                        agent_name,
+                        e
+                    );
                     return Ok(ToolResult {
                         success: false,
                         output: json!({
@@ -530,11 +618,22 @@ impl Tool for OrchestratorTool {
             }
         }
 
+        let final_tracked = tracker.lock();
+        let tool_names: Vec<&str> = final_tracked.iter().map(|tc| tc.name.as_str()).collect();
+        info!(
+            orchestration = orch_name,
+            total_tool_calls = final_tracked.len(),
+            tools_called = ?tool_names,
+            "[orchestrate] DONE orchestration '{orch_name}' — {} tool calls: {:?}",
+            final_tracked.len(),
+            tool_names
+        );
+
         Ok(ToolResult {
             success: true,
             output: json!({
                 "response": current_input,
-                ORCHESTRATED_CALLS_KEY: &*tracker.lock(),
+                ORCHESTRATED_CALLS_KEY: &*final_tracked,
             })
             .to_string(),
             error: None,

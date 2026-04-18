@@ -380,6 +380,10 @@ pub struct Config {
     #[serde(default)]
     pub swarms: HashMap<String, SwarmConfig>,
 
+    /// Orchestration configurations for sequential multi-agent pipelines.
+    #[serde(default)]
+    pub orchestrations: HashMap<String, OrchestrationConfig>,
+
     /// Hooks configuration (lifecycle hooks and built-in hook toggles).
     #[serde(default)]
     #[nested]
@@ -715,6 +719,31 @@ const DEFAULT_SWARM_TIMEOUT_SECS: u64 = 300;
 
 fn default_swarm_timeout_secs() -> u64 {
     DEFAULT_SWARM_TIMEOUT_SECS
+}
+
+/// Configuration for a named orchestration (sequential multi-agent pipeline).
+///
+/// Each orchestration defines an ordered list of agents that run sequentially,
+/// with each agent's output forwarded as input to the next. Unlike swarms,
+/// orchestration agents run in agentic mode with their own tool-call loop,
+/// and tool events are bubbled up to the WebSocket for proxy visibility.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct OrchestrationConfig {
+    /// Ordered list of agent names to execute sequentially.
+    /// Each must reference a key in `[agents.*]`.
+    pub agents: Vec<String>,
+    /// Optional description shown to the LLM when choosing orchestrations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Maximum total timeout for the entire orchestration in seconds.
+    #[serde(default = "default_orchestration_timeout_secs")]
+    pub timeout_secs: u64,
+}
+
+const DEFAULT_ORCHESTRATION_TIMEOUT_SECS: u64 = 300;
+
+fn default_orchestration_timeout_secs() -> u64 {
+    DEFAULT_ORCHESTRATION_TIMEOUT_SECS
 }
 
 /// Valid temperature range for all paths (config, CLI, env override).
@@ -8922,6 +8951,7 @@ impl Default for Config {
             delegate: DelegateToolConfig::default(),
             agents: HashMap::new(),
             swarms: HashMap::new(),
+            orchestrations: HashMap::new(),
             hooks: HooksConfig::default(),
             hardware: HardwareConfig::default(),
             query_classification: QueryClassificationConfig::default(),
@@ -11389,6 +11419,7 @@ auto_save = true
             delegate: DelegateToolConfig::default(),
             agents: HashMap::new(),
             swarms: HashMap::new(),
+            orchestrations: HashMap::new(),
             hooks: HooksConfig::default(),
             hardware: HardwareConfig::default(),
             transcription: TranscriptionConfig::default(),
@@ -11919,6 +11950,7 @@ default_temperature = 0.7
             delegate: DelegateToolConfig::default(),
             agents: HashMap::new(),
             swarms: HashMap::new(),
+            orchestrations: HashMap::new(),
             hooks: HooksConfig::default(),
             hardware: HardwareConfig::default(),
             transcription: TranscriptionConfig::default(),

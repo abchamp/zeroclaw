@@ -27,7 +27,7 @@ pub use schema::{
     SchedulerConfig, SearchMode, SecretsConfig, SecurityConfig, SecurityOpsConfig, ShellToolConfig,
     SkillCreationConfig, SkillImprovementConfig, SkillsConfig, SkillsPromptInjectionMode,
     SlackConfig, SopConfig, StorageConfig, StorageProviderConfig, StorageProviderSection,
-    StreamMode, SwarmConfig, SwarmStrategy, TelegramConfig, TextBrowserConfig, ToolFilterGroup,
+    StreamMode, SwarmConfig, SwarmStrategy, OrchestrationConfig, TelegramConfig, TextBrowserConfig, ToolFilterGroup,
     ToolFilterGroupMode, TranscriptionConfig, TtsConfig, TunnelConfig, VerifiableIntentConfig,
     WebFetchConfig, WebSearchConfig, WebhookConfig, WhatsAppChatPolicy, WhatsAppWebMode,
     WorkspaceConfig, apply_channel_proxy_to_builder, apply_runtime_proxy_to_builder,

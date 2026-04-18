@@ -1275,6 +1275,39 @@ impl Agent {
 
             let results = self.execute_tools(&calls).await;
 
+            // Re-emit sub-agent tool events from orchestrated pipelines.
+            // The orchestrator encodes tracked tool calls as JSON in
+            // ToolResult.output under the `__orchestrated_tool_calls` key.
+            // Re-emitting them as TurnEvents makes them visible on the
+            // WebSocket so the proxy can intercept e.g. cron_add → MongoDB.
+            for result in &results {
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&result.output) {
+                    if let Some(sub_calls) = parsed
+                        .get(crate::tools::orchestrator::ORCHESTRATED_CALLS_KEY)
+                        .and_then(|v| v.as_array())
+                    {
+                        for sc in sub_calls {
+                            let name = sc["name"].as_str().unwrap_or_default().to_string();
+                            let _ = event_tx
+                                .send(TurnEvent::ToolCall {
+                                    name: name.clone(),
+                                    args: sc["args"].clone(),
+                                })
+                                .await;
+                            let _ = event_tx
+                                .send(TurnEvent::ToolResult {
+                                    name,
+                                    output: sc["result"]
+                                        .as_str()
+                                        .unwrap_or_default()
+                                        .to_string(),
+                                })
+                                .await;
+                        }
+                    }
+                }
+            }
+
             // Notify about each tool result
             for result in &results {
                 let _ = event_tx

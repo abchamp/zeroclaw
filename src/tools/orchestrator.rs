@@ -60,20 +60,25 @@ impl Tool for TrackingToolWrapper {
 
     async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
         let tool_name = self.inner.name().to_string();
+        let args_preview: String = args.to_string().chars().take(300).collect();
         info!(
             tool = %tool_name,
-            "[orchestrate] SUB-TOOL '{}' called",
-            tool_name
+            args = %args_preview,
+            "[orchestrate] SUB-TOOL '{}' called — args: {}",
+            tool_name,
+            args_preview
         );
         let result = self.inner.execute(args.clone()).await?;
+        let output_preview: String = result.output.chars().take(300).collect();
         info!(
             tool = %tool_name,
             success = result.success,
             output_len = result.output.len(),
-            "[orchestrate] SUB-TOOL '{}' result (success={}, output={}chars)",
+            "[orchestrate] SUB-TOOL '{}' result (success={}, output={}chars) preview: {}",
             tool_name,
             result.success,
-            result.output.len()
+            result.output.len(),
+            output_preview
         );
         self.tracker.lock().push(TrackedToolCall {
             name: tool_name,
@@ -375,7 +380,7 @@ impl OrchestratorTool {
                 None,  // activated_tools
                 None,  // model_switch_callback
                 &crate::config::PacingConfig::default(),
-                0,     // max_tool_result_chars
+                20000, // max_tool_result_chars: safety net for large API responses
                 0,     // context_token_budget
                 None,  // shared_budget
             ),
@@ -580,17 +585,19 @@ impl Tool for OrchestratorTool {
             {
                 Ok(output) => {
                     let tracked_count = tracker.lock().len();
+                    let agent_output_preview: String = output.chars().take(500).collect();
                     info!(
                         agent = agent_name,
                         step = i + 1,
                         output_len = output.len(),
                         tracked_tool_calls = tracked_count,
-                        "[orchestrate] AGENT {}/{} '{}' completed (output={}chars, tracked_calls={})",
+                        "[orchestrate] AGENT {}/{} '{}' completed (output={}chars, tracked_calls={}) output_preview: {}",
                         i + 1,
                         orch_config.agents.len(),
                         agent_name,
                         output.len(),
-                        tracked_count
+                        tracked_count,
+                        agent_output_preview
                     );
                     current_input = output;
                 }

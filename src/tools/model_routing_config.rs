@@ -709,6 +709,7 @@ impl ModelRoutingConfigTool {
                 agentic_timeout_secs: None,
                 skills_directory: None,
                 memory_namespace: None,
+                allowed_skills: Vec::new(),
             });
 
         next_agent.provider = provider;

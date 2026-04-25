@@ -550,6 +550,24 @@ impl Agent {
             None
         };
 
+        // Filter out excluded tools from the main agent's tool list.
+        // Excluded tools are still registered in parent_tools (sub-agents can
+        // access them via allowed_tools) but are not visible to the main LLM.
+        let tools = if config.agent.excluded_tools.is_empty() {
+            tools
+        } else {
+            let excluded: std::collections::HashSet<&str> = config
+                .agent
+                .excluded_tools
+                .iter()
+                .map(|s| s.as_str())
+                .collect();
+            tools
+                .into_iter()
+                .filter(|t| !excluded.contains(t.name()))
+                .collect()
+        };
+
         Agent::builder()
             .provider(provider)
             .tools(tools)
@@ -1275,6 +1293,39 @@ impl Agent {
 
             let results = self.execute_tools(&calls).await;
 
+            // Re-emit sub-agent tool events from orchestrated pipelines.
+            // The orchestrator encodes tracked tool calls as JSON in
+            // ToolResult.output under the `__orchestrated_tool_calls` key.
+            // Re-emitting them as TurnEvents makes them visible on the
+            // WebSocket so the proxy can intercept e.g. cron_add → MongoDB.
+            for result in &results {
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&result.output) {
+                    if let Some(sub_calls) = parsed
+                        .get(crate::tools::orchestrator::ORCHESTRATED_CALLS_KEY)
+                        .and_then(|v| v.as_array())
+                    {
+                        for sc in sub_calls {
+                            let name = sc["name"].as_str().unwrap_or_default().to_string();
+                            let _ = event_tx
+                                .send(TurnEvent::ToolCall {
+                                    name: name.clone(),
+                                    args: sc["args"].clone(),
+                                })
+                                .await;
+                            let _ = event_tx
+                                .send(TurnEvent::ToolResult {
+                                    name,
+                                    output: sc["result"]
+                                        .as_str()
+                                        .unwrap_or_default()
+                                        .to_string(),
+                                })
+                                .await;
+                        }
+                    }
+                }
+            }
+
             // Notify about each tool result
             for result in &results {
                 let _ = event_tx
@@ -1284,6 +1335,36 @@ impl Agent {
                     })
                     .await;
             }
+
+            // Strip __orchestrated_tool_calls from results before adding to
+            // history. The re-emit above already forwarded sub-tool events to
+            // the WebSocket; keeping the raw JSON in history confuses the LLM
+            // (it sees the full cron_add args/result and may re-call orchestrate).
+            let results: Vec<_> = results
+                .into_iter()
+                .map(|mut r| {
+                    if let Ok(mut parsed) =
+                        serde_json::from_str::<serde_json::Value>(&r.output)
+                    {
+                        if parsed
+                            .get(crate::tools::orchestrator::ORCHESTRATED_CALLS_KEY)
+                            .is_some()
+                        {
+                            // Keep only the "response" field for LLM history
+                            if let Some(response) = parsed.get("response").and_then(|v| v.as_str())
+                            {
+                                r.output = response.to_string();
+                            } else {
+                                parsed
+                                    .as_object_mut()
+                                    .map(|obj| obj.remove(crate::tools::orchestrator::ORCHESTRATED_CALLS_KEY));
+                                r.output = parsed.to_string();
+                            }
+                        }
+                    }
+                    r
+                })
+                .collect();
 
             let formatted = self.tool_dispatcher.format_results(&results);
             self.history.push(formatted);

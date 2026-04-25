@@ -77,6 +77,7 @@ pub mod model_switch;
 pub mod node_capabilities;
 pub mod node_tool;
 pub mod notion_tool;
+pub mod orchestrator;
 pub mod opencode_cli;
 pub mod pdf_read;
 pub mod pipeline;
@@ -938,10 +939,36 @@ pub fn all_tools_with_runtime(
         tool_arcs.push(Arc::new(SwarmTool::new(
             root_config.swarms.clone(),
             swarm_agents,
-            delegate_fallback_credential,
+            delegate_fallback_credential.clone(),
             security.clone(),
-            provider_runtime_options,
+            provider_runtime_options.clone(),
         )));
+    }
+
+    // Add orchestrator tool when orchestrations are configured
+    if !root_config.orchestrations.is_empty() {
+        let orch_agents: HashMap<String, DelegateAgentConfig> = agents
+            .iter()
+            .map(|(name, cfg)| (name.clone(), cfg.clone()))
+            .collect();
+        let parent_tools_for_orch = delegate_handle
+            .as_ref()
+            .map(Arc::clone)
+            .unwrap_or_else(|| Arc::new(RwLock::new(tool_arcs.clone())));
+
+        tool_arcs.push(Arc::new(
+            orchestrator::OrchestratorTool::new(
+                root_config.orchestrations.clone(),
+                orch_agents,
+                delegate_fallback_credential.clone(),
+                security.clone(),
+                provider_runtime_options.clone(),
+            )
+            .with_parent_tools(parent_tools_for_orch)
+            .with_multimodal_config(root_config.multimodal.clone())
+            .with_delegate_config(root_config.delegate.clone())
+            .with_workspace_dir(workspace_dir.to_path_buf()),
+        ));
     }
 
     // Workspace management tool (conditionally registered when workspace isolation is enabled)
@@ -1275,6 +1302,7 @@ mod tests {
                 agentic_timeout_secs: None,
                 skills_directory: None,
                 memory_namespace: None,
+                allowed_skills: Vec::new(),
             },
         );
 

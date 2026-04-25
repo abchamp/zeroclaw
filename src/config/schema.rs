@@ -380,6 +380,10 @@ pub struct Config {
     #[serde(default)]
     pub swarms: HashMap<String, SwarmConfig>,
 
+    /// Orchestration configurations for sequential multi-agent pipelines.
+    #[serde(default)]
+    pub orchestrations: HashMap<String, OrchestrationConfig>,
+
     /// Hooks configuration (lifecycle hooks and built-in hook toggles).
     #[serde(default)]
     #[nested]
@@ -669,6 +673,11 @@ pub struct DelegateAgentConfig {
     /// preventing cross-contamination with memory from other agents.
     #[serde(default)]
     pub memory_namespace: Option<String>,
+    /// Optional skill names to load for this agent.
+    /// When empty (default), no skills are loaded (keeps context small).
+    /// When set, only skills matching these names are injected into the system prompt.
+    #[serde(default)]
+    pub allowed_skills: Vec<String>,
 }
 
 fn default_delegate_timeout_secs() -> u64 {
@@ -715,6 +724,31 @@ const DEFAULT_SWARM_TIMEOUT_SECS: u64 = 300;
 
 fn default_swarm_timeout_secs() -> u64 {
     DEFAULT_SWARM_TIMEOUT_SECS
+}
+
+/// Configuration for a named orchestration (sequential multi-agent pipeline).
+///
+/// Each orchestration defines an ordered list of agents that run sequentially,
+/// with each agent's output forwarded as input to the next. Unlike swarms,
+/// orchestration agents run in agentic mode with their own tool-call loop,
+/// and tool events are bubbled up to the WebSocket for proxy visibility.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct OrchestrationConfig {
+    /// Ordered list of agent names to execute sequentially.
+    /// Each must reference a key in `[agents.*]`.
+    pub agents: Vec<String>,
+    /// Optional description shown to the LLM when choosing orchestrations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Maximum total timeout for the entire orchestration in seconds.
+    #[serde(default = "default_orchestration_timeout_secs")]
+    pub timeout_secs: u64,
+}
+
+const DEFAULT_ORCHESTRATION_TIMEOUT_SECS: u64 = 300;
+
+fn default_orchestration_timeout_secs() -> u64 {
+    DEFAULT_ORCHESTRATION_TIMEOUT_SECS
 }
 
 /// Valid temperature range for all paths (config, CLI, env override).
@@ -1516,6 +1550,14 @@ pub struct AgentConfig {
     /// behavior). Default: `2`.
     #[serde(default = "default_keep_tool_context_turns")]
     pub keep_tool_context_turns: usize,
+
+    /// Tools to exclude from the main agent's tool list.
+    /// Tools listed here are still registered internally (sub-agents can use them
+    /// via `allowed_tools`) but are not sent to the LLM as available tools.
+    /// Use this to reduce tool noise for models that struggle with large tool lists.
+    /// Default: `[]` (no exclusions — all tools visible).
+    #[serde(default)]
+    pub excluded_tools: Vec<String>,
 }
 
 fn default_max_tool_result_chars() -> usize {
@@ -1567,6 +1609,7 @@ impl Default for AgentConfig {
                 crate::agent::context_compressor::ContextCompressionConfig::default(),
             max_tool_result_chars: default_max_tool_result_chars(),
             keep_tool_context_turns: default_keep_tool_context_turns(),
+            excluded_tools: Vec::new(),
         }
     }
 }
@@ -8922,6 +8965,7 @@ impl Default for Config {
             delegate: DelegateToolConfig::default(),
             agents: HashMap::new(),
             swarms: HashMap::new(),
+            orchestrations: HashMap::new(),
             hooks: HooksConfig::default(),
             hardware: HardwareConfig::default(),
             query_classification: QueryClassificationConfig::default(),
@@ -11389,6 +11433,7 @@ auto_save = true
             delegate: DelegateToolConfig::default(),
             agents: HashMap::new(),
             swarms: HashMap::new(),
+            orchestrations: HashMap::new(),
             hooks: HooksConfig::default(),
             hardware: HardwareConfig::default(),
             transcription: TranscriptionConfig::default(),
@@ -11919,6 +11964,7 @@ default_temperature = 0.7
             delegate: DelegateToolConfig::default(),
             agents: HashMap::new(),
             swarms: HashMap::new(),
+            orchestrations: HashMap::new(),
             hooks: HooksConfig::default(),
             hardware: HardwareConfig::default(),
             transcription: TranscriptionConfig::default(),
@@ -12008,6 +12054,7 @@ default_temperature = 0.7
                 agentic_timeout_secs: None,
                 skills_directory: None,
                 memory_namespace: None,
+                allowed_skills: Vec::new(),
             },
         );
 
